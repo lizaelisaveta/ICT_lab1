@@ -4,13 +4,13 @@ import numpy as np
 import os 
 from YUV_RGB import yuv2rgb
 import tensorflow
-from tensorflow.keras.layers import Input, Flatten, Dense
-from tensorflow.keras.layers import Conv2D,UpSampling2D
-from tensorflow.keras.layers import GlobalMaxPooling2D, MaxPooling2D, AveragePooling2D, GlobalAveragePooling2D,Activation, concatenate
+from tensorflow.keras.layers import Input, Flatten, Dense, Conv2D, UpSampling2D, GlobalMaxPooling2D, MaxPooling2D, AveragePooling2D, GlobalAveragePooling2D, Activation, concatenate, BatchNormalization
 from tensorflow.keras import models, layers
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam, SGD, AdamW
 from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
 
 #Frame size of training data
 w=480
@@ -47,23 +47,13 @@ def yuv2rgb (Y,U,V,fw,fh):
     gf = Y - 0.3455 * (U - 128.0) - 0.7169 * (V - 128.0)
     bf = Y + 1.7790 * (U - 128.0)
 
-    for m in range(fh):
-        for n in range(fw):
-            if (rf[m, n] > 255):
-                rf[m, n] = 255
-            if (gf[m, n] > 255):
-                gf[m, n] = 255
-            if (bf[m, n] > 255):
-                bf[m, n] = 255
-            if (rf[m, n] < 0):
-                rf[m, n] = 0
-            if (gf[m, n] < 0):
-                gf[m, n] = 0
-            if (bf[m, n] < 0):
-                bf[m, n] = 0
-    r = rf
-    g = gf
-    b = bf
+    rf = np.clip(rf, 0, 255)
+    gf = np.clip(gf, 0, 255)
+    bf = np.clip(bf, 0, 255)
+
+    r = rf.astype(np.uint8)
+    g = gf.astype(np.uint8)
+    b = bf.astype(np.uint8)
     return r, g, b
 
 def FromFolderYuvToFolderPNG (folderyuv,folderpng,fw,fh):
@@ -143,38 +133,38 @@ def LoadImagesFromFolder (foldername):
     return x
 
 def psnr(y_true, y_pred):
-    # Вычисляем MSE (Mean Squared Error)
+    y_true = tensorflow.cast(y_true, tensorflow.float32) # Приводим к float32
+    y_pred = tensorflow.cast(y_pred, tensorflow.float32) # Приводим к float32
     mse = tensorflow.reduce_mean(tensorflow.square(y_true - y_pred))
-    # Задаем максимальное значение пикселя (например, для изображений с нормализацией от 0 до 1 это 1.0)
     max_pixel_value = 1.0
-    # Вычисляем PSNR
     psnr = 10.0 * tensorflow.math.log((max_pixel_value ** 2) / mse) / tensorflow.math.log(10.0)
     return psnr
 
 
 def EnhancerModel (fw,fh):
     comp_tensor = layers.Input(shape=(fh, fw, 3))
-    conv_1 = layers.Conv2D(filters=128, kernel_size=[9, 9], padding="same", name='conv_1')(comp_tensor)
-    conv_1 = layers.PReLU(name='prelu_1', shared_axes=[1, 2])(conv_1)
-    conv_2 = layers.Conv2D(filters=64, kernel_size=[7, 7], padding="same", name='conv_2')(conv_1)
-    conv_2 = layers.PReLU(name='prelu_2', shared_axes=[1, 2])(conv_2)
+    # Используем ядра 3x3 и 5x5
+    conv_1 = layers.Conv2D(filters=128, kernel_size=[3, 3], padding="same", name='conv_1')(comp_tensor)
+    conv_1 = layers.ReLU()(conv_1)
+    conv_2 = layers.Conv2D(filters=64, kernel_size=[5, 5], padding="same", name='conv_2')(conv_1)
+    conv_2 = layers.ReLU()(conv_2)
     conv_3 = layers.Conv2D(filters=64, kernel_size=[3, 3], padding="same", name='conv_3')(conv_2)
-    conv_3 = layers.PReLU(name='prelu_3', shared_axes=[1, 2])(conv_3)
-    conv_4 = layers.Conv2D(filters=32, kernel_size=[1, 1], padding="same", name='conv_4')(conv_3)
-    conv_4 = layers.PReLU(name='prelu_4', shared_axes=[1, 2])(conv_4)
-    conv_11 = layers.Conv2D(filters=128, kernel_size=[9, 9], padding="same", name='conv_6')(comp_tensor)
-    conv_11 = layers.PReLU(name='prelu_6', shared_axes=[1, 2])(conv_11)
+    conv_3 = layers.ReLU()(conv_3)
+    conv_4 = layers.Conv2D(filters=32, kernel_size=[3,3], padding="same", name='conv_4')(conv_3)
+    conv_4 = layers.ReLU()(conv_4)
+    conv_11 = layers.Conv2D(filters=128, kernel_size=[3, 3], padding="same", name='conv_6')(comp_tensor)
+    conv_11 = layers.ReLU()(conv_11)
     feat_11 = concatenate([conv_1, conv_11], axis=-1)
-    conv_22 = layers.Conv2D(filters=64, kernel_size=[7, 7], padding="same", name='conv_7')(feat_11)
-    conv_22 = layers.PReLU(name='prelu_7', shared_axes=[1, 2])(conv_22)
+    conv_22 = layers.Conv2D(filters=64, kernel_size=[5, 5], padding="same", name='conv_7')(feat_11)
+    conv_22 = layers.ReLU()(conv_22)
     feat_22 = concatenate([conv_2, conv_22], axis=-1)
     conv_33 = layers.Conv2D(filters=64, kernel_size=[3, 3], padding="same", name='conv_8')(feat_22)
-    conv_33 = layers.PReLU(name='prelu_8', shared_axes=[1, 2])(conv_33)
+    conv_33 = layers.ReLU()(conv_33)
     feat_33 = concatenate([conv_3, conv_33], axis=-1)
-    conv_44 = layers.Conv2D(filters=32, kernel_size=[1, 1], padding="same", name='conv_9')(feat_33)
-    conv_44 = layers.PReLU(name='prelu_9', shared_axes=[1, 2])(conv_44)
+    conv_44 = layers.Conv2D(filters=32, kernel_size=[3, 3], padding="same", name='conv_9')(feat_33)
+    conv_44 = layers.ReLU()(conv_44)
     feat_44 = concatenate([conv_4, conv_44], axis=-1)
-    conv_10 = layers.Conv2D(filters=3, kernel_size=[5, 5], padding="same", name='conv_out')(feat_44)
+    conv_10 = layers.Conv2D(filters=3, kernel_size=[3, 3], padding="same", name='conv_out')(feat_44)
     output_tensor = comp_tensor + conv_10
     enhancer = Model(inputs=comp_tensor, outputs=output_tensor)
     return enhancer
@@ -194,56 +184,38 @@ def TrainImageEnhancementModel (folderRaw,folderComp,folderRawVal,folderCompVal)
     XcompVal = LoadImagesFromFolder(folderCompVal)
     XrawVal = XrawVal / 255.0
     XcompVal = XcompVal / 255.0
+
     enhancer = EnhancerModel (patchsize,patchsize)
-    #learning_rate_schedule = tensorflow.keras.optimizers.schedules.ExponentialDecay(
-    #    initial_learning_rate=0.001,
-    #    decay_steps=300,
-    #    decay_rate=0.96)
-    #optimizer=tensorflow.keras.optimizers.Adam(learning_rate=learning_rate_schedule)
-    optimizer = tensorflow.keras.optimizers.Adam()
-    print(optimizer.get_config())
-    #{'name': 'adam', 'learning_rate': 0.0010000000474974513, 'weight_decay': None, 'clipnorm': None,
-    # 'global_clipnorm': None, 'clipvalue': None, 'use_ema': False, 'ema_momentum': 0.99,
-    # 'ema_overwrite_frequency': None, 'loss_scale_factor': None, 'gradient_accumulation_steps': None, 'beta_1': 0.9,
-    # 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}
+    optimizer = AdamW(learning_rate=0.001) # AdamW optimizer
 
-    optimizer = tensorflow.keras.optimizers.Adam(
-        learning_rate=0.0001,
-        beta_1=0.9,
-        beta_2=0.999,
-        epsilon=1e-07,
-        weight_decay=None,
-        clipnorm=None,
-        global_clipnorm=None,
-        clipvalue=None,
-        use_ema=False,
-        ema_momentum=0.99,
-        ema_overwrite_frequency=None,
-        loss_scale_factor=None,
-        gradient_accumulation_steps=None,
-        amsgrad=False)
-    print(optimizer.get_config())
     enhancer.compile(loss='mean_squared_error',optimizer=optimizer,metrics=[psnr])
-    #enhancer.compile(loss='mean_squared_error', optimizer=optimizer, metrics=[psnr])
 
-    # Путь для сохранения модели
-    checkpoint_filepath = 'best_model.weights.h5'
-
-    # Определяем колбэк для сохранения наилучшей модели
-    checkpoint_callback = ModelCheckpoint(
-        filepath=checkpoint_filepath,  # куда сохраняем веса
-        monitor='val_loss',  # метрика для отслеживания
-        save_best_only=True,  # сохраняем только наилучшие веса
-        save_weights_only=True,  # сохраняем только веса (не архитектуру)
-        mode='min',  # минимизируем значение метрики
-        verbose=1  # вывод информации в процессе обучения
+    # Аугментация данных
+    datagen = ImageDataGenerator(
+        rotation_range=180,  # Повороты на 90 и 180 градусов
+        horizontal_flip=False,  # Горизонтальное отражение (по необходимости)
+        vertical_flip=False   # Вертикальное отражение (по необходимости)
     )
 
+    checkpoint_filepath = 'best_model.weights.h5'
+    checkpoint_callback = ModelCheckpoint(
+        filepath=checkpoint_filepath,
+        monitor='val_psnr',
+        save_best_only=True,
+        save_weights_only=True,
+        mode='max',
+        verbose=1
+    )
+
+
     NumEpochs=200
-    #enhancer.load_weights('enhancer.weights.h5')
-    #with tensorflow.device('gpu'):
-    hist = enhancer.fit(Xcomp, Xraw, epochs=NumEpochs, batch_size=128, verbose=1,
-                            validation_data=(XcompVal, XrawVal),callbacks=[checkpoint_callback])
+    hist = enhancer.fit(
+        datagen.flow(Xcomp, Xraw, batch_size=128),  # Используем аугментацию
+        epochs=NumEpochs,
+        steps_per_epoch=len(Xcomp) // 128,
+        validation_data=(XcompVal, XrawVal),
+        callbacks=[checkpoint_callback]
+    )
     enhancer.save_weights('enhancer.weights.h5')
 
     return enhancer
@@ -251,7 +223,7 @@ def TrainImageEnhancementModel (folderRaw,folderComp,folderRawVal,folderCompVal)
 def InferenceImageEnhancementModel (fw,fh):
     enhancer = EnhancerModel (fw,fh)
     enhancer.compile(loss='mean_squared_error',optimizer='Adam',metrics=[psnr])
-    enhancer.load_weights('enhancer.weights.h5')
+    enhancer.load_weights('best_model.weights.h5')
 
     return enhancer
 
