@@ -23,7 +23,7 @@
 [pdf](./doc/Enhancing_Quality_for_HEVC_Compressed_Videos.pdf)
 
 Инструкция:
-Создать окружение
-Добавить папки (testrawpng, testcomppng, trainrawpng, traincomppng);
-Установить PrepareDataSetFromYUV=0
-Запустить файл QECNNYUV.py
+- Создать окружение;
+- Добавить папки (testrawpng, testcomppng, trainrawpng, traincomppng);
+- Установить PrepareDataSetFromYUV=0;
+- Запустить файл QECNNYUV.py.
