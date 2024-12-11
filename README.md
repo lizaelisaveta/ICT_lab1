@@ -9,8 +9,6 @@
 Модель нейронной сети заимствована из работы [2]. Эффективность работы текущей версии модели можно представить в виде графика ниже:
 ![PSNR до и после улучшения для первых 20 изображений](./doc/Figure_1.png)
 
-Код протестирован на OC Windows 10 и Ubuntu 24.
-
 ## Описание задания к лабораторной работе
 Улучшить QECNN модель так, чтобы модифицированная версия:
 - выиграла на 100 изображениях из файла BSD500test.yuv в среднем 0.2 дБ и более по метрике PSNR; 
@@ -23,3 +21,9 @@
 [1] https://github.com/BIDS/BSDS500<br />
 [2] R. Yang et al., "Enhancing Quality for HEVC Compressed Videos," IEEE Transactions on Circuits and Systems for Video Technology, 2019.
 [pdf](./doc/Enhancing_Quality_for_HEVC_Compressed_Videos.pdf)
+
+Инструкция:
+Создать окружение
+Добавить папки (testrawpng, testcomppng, trainrawpng, traincomppng);
+Установить PrepareDataSetFromYUV=0
+Запустить файл QECNNYUV.py
