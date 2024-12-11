@@ -192,9 +192,9 @@ def TrainImageEnhancementModel (folderRaw,folderComp,folderRawVal,folderCompVal)
 
     # Аугментация данных
     datagen = ImageDataGenerator(
-        rotation_range=180,  # Повороты на 90 и 180 градусов
-        horizontal_flip=False,  # Горизонтальное отражение (по необходимости)
-        vertical_flip=False   # Вертикальное отражение (по необходимости)
+        rotation_range=180, 
+        horizontal_flip=False, 
+        vertical_flip=False  
     )
 
     checkpoint_filepath = 'best_model.weights.h5'
