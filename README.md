@@ -24,5 +24,6 @@
 
 ## Инструкция:
 - Создать окружение;
+- Добавить папки (testrawpng, testcomppng, trainrawpng, traincomppng);
 - Установить PrepareDataSetFromYUV=0;
 - Запустить файл QECNNYUV.py.
