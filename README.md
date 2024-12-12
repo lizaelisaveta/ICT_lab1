@@ -22,8 +22,7 @@
 [2] R. Yang et al., "Enhancing Quality for HEVC Compressed Videos," IEEE Transactions on Circuits and Systems for Video Technology, 2019.
 [pdf](./doc/Enhancing_Quality_for_HEVC_Compressed_Videos.pdf)
 
-Инструкция:
+## Инструкция:
 - Создать окружение;
-- Добавить папки (testrawpng, testcomppng, trainrawpng, traincomppng);
 - Установить PrepareDataSetFromYUV=0;
 - Запустить файл QECNNYUV.py.
