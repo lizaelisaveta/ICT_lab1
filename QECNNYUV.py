@@ -1,13 +1,11 @@
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
-import os 
+import os
 from YUV_RGB import yuv2rgb
 import tensorflow
-from tensorflow.keras.layers import Input, Flatten, Dense
-from tensorflow.keras.layers import Conv2D,UpSampling2D
-from tensorflow.keras.layers import GlobalMaxPooling2D, MaxPooling2D, AveragePooling2D, GlobalAveragePooling2D,Activation, concatenate
-from tensorflow.keras import models, layers
+from tensorflow.keras.layers import Conv2D, Add
+from tensorflow.keras import layers
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam, SGD, AdamW
 from tensorflow.keras.callbacks import ModelCheckpoint
@@ -30,7 +28,7 @@ trainfolderRawYuv = './trainrawyuv/'
 trainfolderRawPng = './trainrawpng/'
 trainfolderCompYuv = './traincompyuv/'
 trainfolderCompPng = './traincomppng/'
-
+     
 def cal_psnr(img_orig, img_out):
     squared_error = np.square(img_orig - img_out)
     mse = np.mean(squared_error)
@@ -47,24 +45,15 @@ def yuv2rgb (Y,U,V,fw,fh):
     gf = Y - 0.3455 * (U - 128.0) - 0.7169 * (V - 128.0)
     bf = Y + 1.7790 * (U - 128.0)
 
-    for m in range(fh):
-        for n in range(fw):
-            if (rf[m, n] > 255):
-                rf[m, n] = 255
-            if (gf[m, n] > 255):
-                gf[m, n] = 255
-            if (bf[m, n] > 255):
-                bf[m, n] = 255
-            if (rf[m, n] < 0):
-                rf[m, n] = 0
-            if (gf[m, n] < 0):
-                gf[m, n] = 0
-            if (bf[m, n] < 0):
-                bf[m, n] = 0
-    r = rf
-    g = gf
-    b = bf
+    rf = np.clip(rf, 0, 255)
+    gf = np.clip(gf, 0, 255)
+    bf = np.clip(bf, 0, 255)
+
+    r = rf.astype(np.uint8)
+    g = gf.astype(np.uint8)
+    b = bf.astype(np.uint8)
     return r, g, b
+
 
 def FromFolderYuvToFolderPNG (folderyuv,folderpng,fw,fh):
     dir_list = os.listdir(folderpng)
@@ -136,6 +125,8 @@ def LoadImagesFromFolder (foldername):
     for name in dir_list:
         fullname = foldername + name
         I1 = cv2.imread(fullname)
+        I1 = tensorflow.convert_to_tensor(I1, dtype=tensorflow.float32)
+        I1 = (I1 / 255.0).numpy()
         x[N, :, :, 0] = I1[:, :, 2]
         x[N, :, :, 1] = I1[:, :, 1]
         x[N, :, :, 2] = I1[:, :, 0]
@@ -152,32 +143,18 @@ def psnr(y_true, y_pred):
     return psnr
 
 
-def EnhancerModel (fw,fh):
-    comp_tensor = layers.Input(shape=(fh, fw, 3))
-    conv_1 = layers.Conv2D(filters=128, kernel_size=[9, 9], padding="same", name='conv_1')(comp_tensor)
-    conv_1 = layers.PReLU(name='prelu_1', shared_axes=[1, 2])(conv_1)
-    conv_2 = layers.Conv2D(filters=64, kernel_size=[7, 7], padding="same", name='conv_2')(conv_1)
-    conv_2 = layers.PReLU(name='prelu_2', shared_axes=[1, 2])(conv_2)
-    conv_3 = layers.Conv2D(filters=64, kernel_size=[3, 3], padding="same", name='conv_3')(conv_2)
-    conv_3 = layers.PReLU(name='prelu_3', shared_axes=[1, 2])(conv_3)
-    conv_4 = layers.Conv2D(filters=32, kernel_size=[1, 1], padding="same", name='conv_4')(conv_3)
-    conv_4 = layers.PReLU(name='prelu_4', shared_axes=[1, 2])(conv_4)
-    conv_11 = layers.Conv2D(filters=128, kernel_size=[9, 9], padding="same", name='conv_6')(comp_tensor)
-    conv_11 = layers.PReLU(name='prelu_6', shared_axes=[1, 2])(conv_11)
-    feat_11 = concatenate([conv_1, conv_11], axis=-1)
-    conv_22 = layers.Conv2D(filters=64, kernel_size=[7, 7], padding="same", name='conv_7')(feat_11)
-    conv_22 = layers.PReLU(name='prelu_7', shared_axes=[1, 2])(conv_22)
-    feat_22 = concatenate([conv_2, conv_22], axis=-1)
-    conv_33 = layers.Conv2D(filters=64, kernel_size=[3, 3], padding="same", name='conv_8')(feat_22)
-    conv_33 = layers.PReLU(name='prelu_8', shared_axes=[1, 2])(conv_33)
-    feat_33 = concatenate([conv_3, conv_33], axis=-1)
-    conv_44 = layers.Conv2D(filters=32, kernel_size=[1, 1], padding="same", name='conv_9')(feat_33)
-    conv_44 = layers.PReLU(name='prelu_9', shared_axes=[1, 2])(conv_44)
-    feat_44 = concatenate([conv_4, conv_44], axis=-1)
-    conv_10 = layers.Conv2D(filters=3, kernel_size=[5, 5], padding="same", name='conv_out')(feat_44)
-    output_tensor = comp_tensor + conv_10
-    enhancer = Model(inputs=comp_tensor, outputs=output_tensor)
-    return enhancer
+def EnhancerModel(fw, fh):
+    inputs = layers.Input(shape=(fh, fw, 3))
+    x = Conv2D(64, (3, 3), padding='same', activation='relu')(inputs)
+    for _ in range(5):
+        residual = Conv2D(64, (3, 3), padding='same', activation='relu')(x)
+        residual = Conv2D(64, (3, 3), padding='same')(residual)
+        x = Add()([x, residual])  
+        x = layers.Activation('relu')(x)
+    outputs = Conv2D(3, (3, 3), padding='same')(x)
+    outputs = Add()([inputs, outputs]) 
+    model = Model(inputs, outputs)
+    return model
 
 
 def TrainImageEnhancementModel (folderRaw,folderComp,folderRawVal,folderCompVal):
@@ -185,30 +162,15 @@ def TrainImageEnhancementModel (folderRaw,folderComp,folderRawVal,folderCompVal)
     Xraw = LoadImagesFromFolder(folderRaw)
     print('Loading compressed train images...')
     Xcomp = LoadImagesFromFolder(folderComp)
-    Xraw = Xraw/255.0
-    Xcomp = Xcomp/255.0
 
     print('Loading raw validiation images...')
     XrawVal = LoadImagesFromFolder(folderRawVal)
     print('Loading compressed validiation images...')
     XcompVal = LoadImagesFromFolder(folderCompVal)
-    XrawVal = XrawVal / 255.0
-    XcompVal = XcompVal / 255.0
     enhancer = EnhancerModel (patchsize,patchsize)
-    #learning_rate_schedule = tensorflow.keras.optimizers.schedules.ExponentialDecay(
-    #    initial_learning_rate=0.001,
-    #    decay_steps=300,
-    #    decay_rate=0.96)
-    #optimizer=tensorflow.keras.optimizers.Adam(learning_rate=learning_rate_schedule)
-    optimizer = tensorflow.keras.optimizers.Adam()
-    print(optimizer.get_config())
-    #{'name': 'adam', 'learning_rate': 0.0010000000474974513, 'weight_decay': None, 'clipnorm': None,
-    # 'global_clipnorm': None, 'clipvalue': None, 'use_ema': False, 'ema_momentum': 0.99,
-    # 'ema_overwrite_frequency': None, 'loss_scale_factor': None, 'gradient_accumulation_steps': None, 'beta_1': 0.9,
-    # 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}
 
     optimizer = tensorflow.keras.optimizers.Adam(
-        learning_rate=0.0001,
+        learning_rate=0.001,
         beta_1=0.9,
         beta_2=0.999,
         epsilon=1e-07,
@@ -222,9 +184,7 @@ def TrainImageEnhancementModel (folderRaw,folderComp,folderRawVal,folderCompVal)
         loss_scale_factor=None,
         gradient_accumulation_steps=None,
         amsgrad=False)
-    print(optimizer.get_config())
     enhancer.compile(loss='mean_squared_error',optimizer=optimizer,metrics=[psnr])
-    #enhancer.compile(loss='mean_squared_error', optimizer=optimizer, metrics=[psnr])
 
     # Путь для сохранения модели
     checkpoint_filepath = 'best_model.weights.h5'
@@ -240,19 +200,16 @@ def TrainImageEnhancementModel (folderRaw,folderComp,folderRawVal,folderCompVal)
     )
 
     NumEpochs=200
-    #enhancer.load_weights('enhancer.weights.h5')
-    #with tensorflow.device('gpu'):
     hist = enhancer.fit(Xcomp, Xraw, epochs=NumEpochs, batch_size=128, verbose=1,
                             validation_data=(XcompVal, XrawVal),callbacks=[checkpoint_callback])
     enhancer.save_weights('enhancer.weights.h5')
 
     return enhancer
 
-def InferenceImageEnhancementModel (fw,fh):
+def InferenceImageEnhancementModel (fw,fh, model_path):
     enhancer = EnhancerModel (fw,fh)
     enhancer.compile(loss='mean_squared_error',optimizer='Adam',metrics=[psnr])
-    enhancer.load_weights('enhancer.weights.h5')
-
+    enhancer.load_weights(model_path)
     return enhancer
 
 
@@ -310,7 +267,7 @@ def ShowOneFrameEnhancement(folderyuvraw,foldercomp,VideoIndex,FrameIndex):
     RGBCOMP[:, :, 1] = g2
     RGBCOMP[:, :, 2] = b2
 
-    RGBENH = GetEngancedRGB(RGBCOMP, w, h)
+    RGBENH = GetEngancedRGB(RGBCOMP / 255.0, w, h)
 
     plt.grid(False)
     plt.gray()
@@ -318,7 +275,7 @@ def ShowOneFrameEnhancement(folderyuvraw,foldercomp,VideoIndex,FrameIndex):
     plt.subplot(1, 3, 1)
     plt.imshow(RGBRAW / 255.0)
     psnr1 = cal_psnr(RGBRAW / 255.0, RGBCOMP / 255.0)
-    psnr2 = cal_psnr(RGBRAW / 255.0, RGBENH / 255.0)
+    psnr2 = cal_psnr(RGBRAW / 255.0, RGBENH)
 
     tit = "%.2f, %.2f" % (psnr1, psnr2)
     plt.title(tit)
@@ -334,7 +291,7 @@ def ShowOneFrameEnhancement(folderyuvraw,foldercomp,VideoIndex,FrameIndex):
     plt.gray()
     plt.axis('off')
     plt.subplot(1, 3, 3)
-    plt.imshow(RGBENH / 255.0)
+    plt.imshow(RGBENH)
     plt.show()
 
 def ShowFramePSNRPerformance (folderyuv,foldercomp,VideoIndex,framesmax,fw,fh):
@@ -370,8 +327,8 @@ def ShowFramePSNRPerformance (folderyuv,foldercomp,VideoIndex,framesmax,fw,fh):
                 RGBCOMP[:, :, 1] = g
                 RGBCOMP[:, :, 2] = b
                 PSNRCOMP[f] = cal_psnr(RGBRAW / 255.0, RGBCOMP / 255.0)
-                RGBENH = GetEngancedRGB(RGBCOMP, w, h)
-                PSNRENH[f] = cal_psnr(RGBRAW / 255.0, RGBENH / 255.0)
+                RGBENH = GetEngancedRGB(RGBCOMP / 255.0, w, h)
+                PSNRENH[f] = cal_psnr(RGBRAW / 255.0, RGBENH)
         break
 
     ind = np.argsort(PSNRCOMP)
@@ -399,16 +356,14 @@ if TrainMode==1:
         FromFolderYuvToFolderPNG (trainfolderCompYuv,trainfolderCompPng,w,h)
     TrainImageEnhancementModel(trainfolderRawPng,trainfolderCompPng,testfolderRawPng,testfolderCompPng)
 
-
-
 if 1:
-    enhancer = InferenceImageEnhancementModel (w,h)
+    enhancer = InferenceImageEnhancementModel (w,h,'best_model.weights.h5')
     #ShowOneFrameEnhancement(trainfolderRawYuv,trainfolderCompYuv,0,0)
-    #ShowOneFrameEnhancement(testfolderRawYuv,testfolderCompYuv,0,0)
+    ShowOneFrameEnhancement(testfolderRawYuv,testfolderCompYuv,0,7)
     #ShowOneFrameEnhancement(trainfolderRawYuv, trainfolderCompYuv, 0, 1)
-    #ShowOneFrameEnhancement(testfolderRawYuv, testfolderCompYuv, 0, 1)
-    ShowFramePSNRPerformance (trainfolderRawYuv,trainfolderCompYuv,0,20,w,h)
-    ShowFramePSNRPerformance (testfolderRawYuv,testfolderCompYuv,0,20,w,h)
+    ShowOneFrameEnhancement(testfolderRawYuv, testfolderCompYuv, 0, 11)
+    #ShowFramePSNRPerformance(trainfolderRawYuv,trainfolderCompYuv,0,100,w,h)
+    ShowFramePSNRPerformance (testfolderRawYuv,testfolderCompYuv,0,100,w,h)
 
 
 
